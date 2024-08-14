@@ -81,7 +81,7 @@ static char remove_dir_aux(const char *name, const char *base)
 
 char remove_dir(const char *name)
 {
-    if(!name)
+	if(!name)
         return -1;
     return remove_dir_aux(name, "");
 }

@@ -145,3 +145,19 @@ char *string_catenate(char *dest, const char *src)
     dest[i] = 0;
     return dest;
 }
+
+char *get_word(const char *s, long long *offset)
+{
+	char *word;
+	long long i, len;
+	if(!s)
+		return NULL;
+	len = strlen(s);
+	word = malloc(sizeof(*word)*(len+1));
+	for(i = 0; (i < len) && (s[i] != ' '); i++)
+		word[i] = s[i];
+	word[i] = 0;
+	word = realloc(word, i+1);
+	*offset = i;
+	return word;
+}
