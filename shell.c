@@ -87,18 +87,20 @@ static char *process_path(const char *path, const struct state *state)
 	char *newpath;
 	if(path[0] != '~')
 		return strdup(path);
-	path++;
+	path++; /* skip '~' */
+	if(path[0] == '/')
+		path++; /* skip '/' */
 	newpath = paths_union(state->root, path);
 	return newpath;
 }
 
 #define HELP_INFO "task -- manage todo lists.\n" \
 "Commands:\n" \
-"in	it -- initialize the project.\n" \
+"init -- initialize the project.\n" \
 "exit -- exit from the program.\n" \
 "help -- display this information.\n" \
 "mk [tname] -- making an object of task.\n" \
-"mk [tname -f -- making an object of filter.\n" \
+"mk [tname] -f -- making an object of filter.\n" \
 "rm [tname] -- removing an object.\n" \
 "go [path] -- moving between objects.\n" \
 "show -- display content of current object.\n" \
@@ -194,14 +196,21 @@ static status rm_action(const char *params[])
 static status ln_action(const char *params[], const struct state *state)
 {
 	char ok;
-	char *abspath;
-	char cwd[4096];
+	char *target, *linkpath;
 	if(!params || !params[0] || !params[1])
 		return err_invalid_params;
-	getcwd(cwd, sizeof(cwd));
-	abspath = paths_union(cwd, params[0]);
-	ok = symlink(abspath, params[1]);
-	free(abspath);
+	target = process_path(params[0], state);
+	linkpath = process_path(params[1], state);
+	if(!is_abspath(target)) {
+		char cwd[4096];
+		char *tmp = target;
+		getcwd(cwd, sizeof(cwd));
+		target = paths_union(cwd, target);	
+		free(tmp);
+	}
+	ok = symlink(target, linkpath);
+	free(target);
+	free(linkpath);
 	if(ok == -1) {
 		perror(CMD_LN);
 		return err_failed_ln;
@@ -209,12 +218,17 @@ static status ln_action(const char *params[], const struct state *state)
 	return 0;
 }
 
-static status mv_action(const char *params[])
+static status mv_action(const char *params[], const struct state *state)
 {
 	char ok;
+	char *oldpath, *newpath;
 	if(!params || !params[0] || !params[1])
 		return err_invalid_params;
-	ok = rename(params[0], params[1]);
+	oldpath = process_path(params[0], state);
+	newpath = process_path(params[1], state);
+	ok = rename(oldpath, newpath);
+	free(oldpath);
+	free(newpath);
 	if(ok == -1) {
 		perror(CMD_MV);
 		return err_failed_mv;
@@ -243,7 +257,7 @@ static status cmd_exec(cmd_type ctype, const char *params[],
 		case cmd_ln:
 			return ln_action(params, state);
 		case cmd_mv:
-			return mv_action(params);
+			return mv_action(params, state);
         case cmd_empty:
             return st_cont;
         case cmd_err:

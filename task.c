@@ -220,36 +220,39 @@ static struct task *task_read(const char *path)
     return task;
 }
 
-static const char *task_status_str(const struct task *task)
+static char get_task_status(const struct task *task)
 {
-    return task->completed ? "v" : "x";
+    return task->completed ? 'v' : 'x';
 }
 
 static void print_header(const struct task *task)
 {
-    const char *task_stat = task_status_str(task);
-    char *task_info = task->info ? task->info : "";
+	char status;
+	const char *info;
+	if(!task->name || !(task->name[0]))
+		return;
+	info = task->info ? task->info : "";
+	status = get_task_status(task);
     if(task->type == task_filter) {
-        printf("====%s====\n%s\n\n", task->name, task_info);
+        printf("====%s====\n%s\n\n", task->name, info);
     } else {
-        printf("====[%s] %s====\n%s\n\n", task_stat, task->name,
-            task_info);
+        printf("====[%c] %s====\n%s\n\n", status, task->name, info);
     }
 }
 
 static void print_deadlines(struct deadlines *dls)
 {
     char *str;
-    long long len_from, len_to, len_sep, len_tit;
-    static const char * const separator = " -- ";
-    static const char * const title = "====DEADLINES====\n";
+    long long fromlen, tolen, seplen, titlen;
+    const char separator[] = " -- ";
+    const char title[] = "====DEADLINES====\n";
     if(!dls || !dls->from)
         return;
-    len_sep = sizeof(separator)-1;
-    len_tit = sizeof(title)-1;
-    len_from = string_length(dls->from);
-    len_to = string_length(dls->to);
-    str = malloc(sizeof(*str)*(len_tit+len_from+len_sep+len_to+1));
+    seplen = sizeof(separator)-1;
+    titlen = sizeof(title)-1;
+    fromlen = string_length(dls->from);
+    tolen = string_length(dls->to);
+    str = malloc(sizeof(*str)*(titlen+fromlen+seplen+tolen+1));
     strcpy(str, title);
     string_catenate(str, dls->from); 
     if(dls->to) {
@@ -269,12 +272,12 @@ static void print_addinfo(const struct task *task)
 
 static void print_subtask(struct task *task, const char *shortname)
 {
-    const char *task_stat;
+	char status;
     if(!task)
         return;
-    task_stat = task_status_str(task);
+    status = get_task_status(task);
     if(task->type == task_default)
-        printf("[%s] %s (%s)\n", task_stat, task->name, shortname);
+        printf("[%c] %s (%s)\n", status, task->name, shortname);
     else
         printf("%s (%s)\n", task->name, shortname);
 }
@@ -309,7 +312,10 @@ char print_task(const char *path)
         return -1;
     if(task->name) {
         print_header(task);
+#if 1
+		/* TODO: ERROR HERE! */
         print_addinfo(task);
+#endif
     }
     print_content(path);
 	task_free(task);

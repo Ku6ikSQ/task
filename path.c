@@ -38,3 +38,8 @@ char *paths_union(const char *path1, const char *path2)
 	strcat(result, path2);
 	return result;
 }
+
+char is_abspath(const char *path)
+{
+	return path[0] == path_delim;
+}
