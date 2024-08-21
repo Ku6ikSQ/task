@@ -21,6 +21,21 @@ char *get_shortpath(const char *root, const char *path)
 	return result;
 }
 
+char path_extend(char *path, const char *ext)
+{
+	long long len;
+	if(!path || !ext)
+		return -1;
+	len = strlen(path);
+	if(path[len-1] != path_delim) {
+		path[len] = path_delim;
+		path[len+1] = 0;
+	}
+	strcat(path, ext);
+	return 0;
+}
+
+/* TODO: rewrite it by using "path_extend()" */
 char *paths_union(const char *path1, const char *path2)
 {
 	long long len1, len2;

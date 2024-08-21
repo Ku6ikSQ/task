@@ -123,11 +123,9 @@ static void task_set_name(struct task *task, const char *value)
 		task->name = strdup(value);
 		return;
 	}
-#if 1
 	name = field_extend(task->name, value);
 	free(task->name);
 	task->name = name;
-#endif
 }
 
 static void task_set_info(struct task *task, const char *value)
@@ -137,11 +135,9 @@ static void task_set_info(struct task *task, const char *value)
 		task->info = strdup(value);
 		return;
 	}
-#if 1
 	info = field_extend(task->info, value);
 	free(task->info);
 	task->info = info;
-#endif
 }
 
 static void task_set_completed(struct task *task, const char *value)
@@ -286,6 +282,7 @@ static void print_content(const char *path)
 {
     DIR *dir;
     struct dirent *dent;
+	char taskpath[4096];
     if(!path)
         return;
     dir = opendir(path);
@@ -297,7 +294,15 @@ static void print_content(const char *path)
            (strcmp(dent->d_name, "..") == 0) || 
            (strcmp(dent->d_name, TASK_CORE_FILE) == 0))
             continue;
-        task = task_read(dent->d_name);
+#if 0
+		strcpy(taskpath, path);
+		strcat(taskpath, dent->d_name);
+#else
+		strcpy(taskpath, path);
+		path_extend(taskpath, dent->d_name);
+#endif
+        /*task = task_read(dent->d_name);*/
+        task = task_read(taskpath);
         print_subtask(task, dent->d_name);
         task_free(task);
     }
@@ -312,10 +317,7 @@ char print_task(const char *path)
         return -1;
     if(task->name) {
         print_header(task);
-#if 1
-		/* TODO: ERROR HERE! */
         print_addinfo(task);
-#endif
     }
     print_content(path);
 	task_free(task);

@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "params.h"
 #include "strlib.h"
 #include "memlib.h"
 #include "fslib.h"
@@ -85,8 +86,12 @@ static void print_cwd(const char *root)
 static char *process_path(const char *path, const struct state *state)
 {
 	char *newpath;
+	if(!path)
+		return NULL;
 	if(path[0] != '~')
 		return strdup(path);
+	if(!state)
+		return NULL;
 	path++; /* skip '~' */
 	if(path[0] == '/')
 		path++; /* skip '/' */
@@ -104,6 +109,7 @@ static char *process_path(const char *path, const struct state *state)
 "rm [tname] -- removing an object.\n" \
 "go [path] -- moving between objects.\n" \
 "show -- display content of current object.\n" \
+"show [path] -- display content of an object.\n" \
 "ln [target] [linkpath] -- link an object to another object.\n" \
 "mv [oldpath] [newpath] -- move or rename task.\n" \
 "\nTo edit tasks/filters you can to use any text editor that open the project.\n"
@@ -129,11 +135,18 @@ static status init_action()
     return 0;
 }
 
-static status show_action()
+static status show_action(const char *params[], struct state *state)
 {
     char cdir[bsize];
     char ok;
-    getcwd(cdir, sizeof(cdir));
+	if(params && params[0]) {
+		char *path;
+		path = process_path(params[0], state);
+		strcpy(cdir, path);
+		free(path);
+	}
+	else
+    	getcwd(cdir, sizeof(cdir));
     ok = print_task(cdir);
     if(ok == -1) {
 		perror(CMD_SHOW);
@@ -155,7 +168,7 @@ static status go_action(const char *params[], struct state *state)
 		perror(CMD_GO);
 		return err_failed_go;
 	}
-    return show_action();
+    return show_action(NULL, NULL);
 }
 
 static status mk_action(const char *params[])
@@ -170,8 +183,8 @@ static status mk_action(const char *params[])
 		perror(CMD_MK);
         return err_failed_mk;
 	}
-    if(params[1])
-        is_filter = strcmp(params[1], FILTER_TASK_FLAG) == 0;
+    if(param_search(params, FILTER_TASK_FLAG) != -1)
+		is_filter = 1;
     ok = task_write(fd, is_filter);
     close(fd);
     return ok;
@@ -253,7 +266,7 @@ static status cmd_exec(cmd_type ctype, const char *params[],
         case cmd_go:
             return go_action(params, state);
         case cmd_show:
-            return show_action();
+            return show_action(params, state);
 		case cmd_ln:
 			return ln_action(params, state);
 		case cmd_mv:
