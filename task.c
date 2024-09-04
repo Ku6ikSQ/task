@@ -15,6 +15,7 @@
 #define TCOMPLETED_FLD "completed"
 #define TFROM_FLD "from"
 #define TTO_FLD "to"
+#define TTYPE_FLD "type"
 
 #define TASK_FILTER_TEMPLATE TNAME_FLD "\n" TINFO_FLD "\n"
 #define TASK_TEMPLATE TNAME_FLD "\n" TINFO_FLD "\n" TCOMPLETED_FLD \
@@ -34,6 +35,7 @@ struct task {
     task_t type;
     char *name;
     char *info;
+	char edited;
     char completed;
     struct deadlines *dlines;
 };
@@ -46,38 +48,8 @@ static void task_init(struct task *task)
     task->info = NULL;
     task->dlines = NULL;
     task->completed = 0;
+	task->edited = 0;
     task->type = task_filter;
-}
-
-static void task_free(struct task *task)
-{
-    if(!task)
-        return;
-    if(task->name)
-        free(task->name); 
-    if(task->info)
-        free(task->info);
-    if(task->dlines) {
-        if(task->dlines->from)
-            free(task->dlines->from);
-        if(task->dlines->to)
-            free(task->dlines->to);
-        free(task->dlines);
-    }
-    free(task);
-}
-
-char task_write(int fd, char is_filter)
-{
-    const char *template;
-    char ok;
-    if(fd < 0)
-        return -1;
-    template = is_filter ? TASK_FILTER_TEMPLATE : TASK_TEMPLATE;
-    ok = write(fd, template, strlen(template));
-    if(ok == -1)
-        return -1; 
-    return 0;
 }
 
 static char **get_record(const char *s)
@@ -94,7 +66,7 @@ static char **get_record(const char *s)
 		rec[0] = NULL; /* there's no any record name */
 	while(*s == ' ')
 		s++;
-	rec[1] = strdup(s);
+	rec[1] = string_duplicate(s);
 	rec[2] = NULL;
 	return rec;
 }
@@ -116,28 +88,43 @@ static char *field_extend(const char *str, const char *ext)
 	return newstr;
 }
 
-static void task_set_name(struct task *task, const char *value)
+char set_newlines(char *str)
 {
-	char *name;
-	if(!task->name) {
-		task->name = strdup(value);
-		return;
+	char *match;
+	if(!str)
+		return -1;
+	while((match = strstr(str, "\\n")) != NULL) {
+		//string_shl(match, 1);
+		match[0] = '\n';
+		match[1] = ' ';
 	}
-	name = field_extend(task->name, value);
-	free(task->name);
-	task->name = name;
+	return 0;
 }
 
-static void task_set_info(struct task *task, const char *value)
+static void task_set_text_field(char **pfield, const char *value, 
+	char rewrite)
 {
-	char *info;
-	if(!task->info) {
-		task->info = strdup(value);
-		return;
+	char *newval;
+	if(!pfield || !*pfield || rewrite)
+		newval = string_duplicate(value);
+	else {
+		newval = field_extend(*pfield, value);
+		free(*pfield);
 	}
-	info = field_extend(task->info, value);
-	free(task->info);
-	task->info = info;
+	*pfield = newval;
+	set_newlines(*pfield);
+}
+
+static void task_set_name(struct task *task, const char *value,
+	char rewrite)
+{
+	task_set_text_field(&task->name, value, rewrite);
+}
+
+static void task_set_info(struct task *task, const char *value, 
+	char rewrite)
+{
+	task_set_text_field(&task->info, value, rewrite);
 }
 
 static void task_set_completed(struct task *task, const char *value)
@@ -162,29 +149,61 @@ static void task_set_deadlines(struct task *task, const char *name,
 	if(!value || !*value)
 		return;
 	if(strcmp(name, "from") == 0)
-		task->dlines->from = strdup(value);
+		task->dlines->from = string_duplicate(value);
 	else if(strcmp(name, "to") == 0)
-		task->dlines->to = strdup(value);
+		task->dlines->to = string_duplicate(value);
 }
 
-static void task_set_field(struct task *task, const char *name, 
-	const char *value)
+static void task_set_type(struct task *task, const char *type)
 {
-	if(!task || !name || !value)
+	if(!task || !type)
 		return;
+	if((strcmp(type, "filter") == 0) || strcmp(type, "f") == 0)
+		task->type = task_filter;
+	else
+		task->type = task_default;
+}
+
+char task_set_field(struct task *task, const char *name, const char *value,
+	char rewrite)
+{
+	if(!task || !name)
+		return -1;
+	task->edited = 1;
     if(strcmp(name, TNAME_FLD) == 0)
-		task_set_name(task, value);
+		task_set_name(task, value, rewrite);
     else if(strcmp(name, TINFO_FLD) == 0)
-		task_set_info(task, value);
+		task_set_info(task, value, rewrite);
     else if(strcmp(name, TCOMPLETED_FLD) == 0)
 		task_set_completed(task, value);
     else if((strcmp(name, TFROM_FLD) == 0) || (strcmp(name, TTO_FLD) == 0))
 		task_set_deadlines(task, name, value);
+	else if(strcmp(name, TTYPE_FLD) == 0) 
+		task_set_type(task, value);
+	return 0;
 }
 
-static struct task *task_read(const char *path)
+void task_free(struct task *task)
 {
-    char *corename, *s, *recname;
+    if(!task)
+        return;
+    if(task->name)
+        free(task->name); 
+    if(task->info)
+        free(task->info);
+    if(task->dlines) {
+        if(task->dlines->from)
+            free(task->dlines->from);
+        if(task->dlines->to)
+            free(task->dlines->to);
+        free(task->dlines);
+    }
+    free(task);
+}
+
+struct task *task_read(const char *path)
+{
+    char *corename, *recname, *s;
     struct task *task;
     char buf[4096];
     FILE *f;
@@ -208,12 +227,99 @@ static struct task *task_read(const char *path)
 		if(rec[0]) {
 			if(recname)
 				free(recname);
-			recname = strdup(rec[0]);
+			recname = string_duplicate(rec[0]);
 		}
-		task_set_field(task, recname, rec[1]);
+		task_set_field(task, recname, rec[1], 0);
     }
+	task->edited = 0;
 	fclose(f);
     return task;
+}
+
+static char *get_record_str(const char *name, const char *value)
+{
+	if(!name)
+		return NULL;
+	if(!value)
+		return strings_concatenate(name, "\n", NULL);
+	return strings_concatenate(name, " ", value, "\n", NULL);
+}
+
+static char write_text_field_record(FILE *f, const char *name, 
+	const char *value)
+{
+	char ok;
+	char *rec = get_record_str(name, value);
+	ok = fputs(rec, f) != EOF;
+	free(rec);
+	return ok;
+}
+
+static char write_name_record(FILE *f, const char *name)
+{
+	return write_text_field_record(f, TNAME_FLD, name);
+}
+
+static char write_info_record(FILE *f, const char *info)
+{
+	return write_text_field_record(f, TINFO_FLD, info);
+}
+
+static char write_completed_record(FILE *f, char completed)
+{
+	char ok;
+	char *rec = get_record_str(TCOMPLETED_FLD, 
+		completed ? "true" : "false");
+	ok = fputs(rec, f) != EOF;
+	free(rec);
+	return ok;
+}
+
+static char write_deadlines_record(FILE *f, const struct deadlines *dlines)
+{
+	char ok;
+	char *rec;
+	if(!dlines)
+		return -1;
+	rec = strings_concatenate(TFROM_FLD, " ", dlines->from, "\n", 
+		TTO_FLD, " ", dlines->to, "\n", NULL);
+	ok = fputs(rec, f) != EOF;
+	free(rec);
+	return ok;
+}
+
+char task_write(const char *path, const struct task *task)
+{
+	FILE *f;
+	char *corename;
+	if(!task || !task->edited)
+		return 0;
+    corename = paths_union(path, TASK_CORE_FILE);
+	f = fopen(corename, "w");
+	free(corename);
+	if(!f)
+		return -1;
+	write_name_record(f, task->name);
+	write_info_record(f, task->info);
+	if(task->type == task_default) {
+		write_completed_record(f, task->completed);
+		write_deadlines_record(f, task->dlines);
+	}
+	fclose(f);
+	return 0;
+}
+
+char task_make_file(int fd, char is_filter)
+{
+    const char *template;
+    char ok;
+    if(fd < 0)
+        return -1;
+    template = is_filter ? TASK_FILTER_TEMPLATE : TASK_TEMPLATE;
+    ok = write(fd, template, strlen(template));
+    if(ok == -1)
+        return -1; 
+    return 0;
 }
 
 static char get_task_status(const struct task *task)
@@ -221,13 +327,29 @@ static char get_task_status(const struct task *task)
     return task->completed ? 'v' : 'x';
 }
 
+static void align_str(char *s)
+{
+	while(*s) {
+		if(*s == '\n') {
+			s++;
+			while(*s == ' ')
+				string_shl(s, 1);
+			continue;
+		}
+		s++;
+	}
+}
+
 static void print_header(const struct task *task)
 {
 	char status;
-	const char *info;
+	char *info, *name;
 	if(!task->name || !(task->name[0]))
 		return;
-	info = task->info ? task->info : "";
+	name = strdup(task->name);
+	info = task->info ? strdup(task->info) : "";
+	align_str(name);
+	align_str(info);
 	status = get_task_status(task);
     if(task->type == task_filter) {
         printf("====%s====\n%s\n\n", task->name, info);
@@ -236,25 +358,19 @@ static void print_header(const struct task *task)
     }
 }
 
+#define DLINES_SEP " -- "
+#define DLINES_TITLE "====DEADLINES====\n"
 static void print_deadlines(struct deadlines *dls)
 {
     char *str;
-    long long fromlen, tolen, seplen, titlen;
-    const char separator[] = " -- ";
-    const char title[] = "====DEADLINES====\n";
-    if(!dls || !dls->from)
+	if(!dls || (!dls->from && !dls->to))
         return;
-    seplen = sizeof(separator)-1;
-    titlen = sizeof(title)-1;
-    fromlen = string_length(dls->from);
-    tolen = string_length(dls->to);
-    str = malloc(sizeof(*str)*(titlen+fromlen+seplen+tolen+1));
-    strcpy(str, title);
-    string_catenate(str, dls->from); 
-    if(dls->to) {
-        string_catenate(str, separator);
-        string_catenate(str, dls->to);
-    }
+	if(dls->from && dls->to)
+		str = strings_concatenate(DLINES_TITLE, dls->from, DLINES_SEP,
+			dls->to, NULL);
+	else
+		str = strings_concatenate(DLINES_TITLE,
+			dls->from ? dls->from : dls->to, NULL);
     printf("%s\n\n", str);
     free(str);
 }
@@ -278,7 +394,7 @@ static void print_subtask(struct task *task, const char *shortname)
         printf("%s (%s)\n", task->name, shortname);
 }
 
-static void print_content(const char *path)
+static void print_subtasks(const char *path)
 {
     DIR *dir;
     struct dirent *dent;
@@ -294,14 +410,8 @@ static void print_content(const char *path)
            (strcmp(dent->d_name, "..") == 0) || 
            (strcmp(dent->d_name, TASK_CORE_FILE) == 0))
             continue;
-#if 0
-		strcpy(taskpath, path);
-		strcat(taskpath, dent->d_name);
-#else
 		strcpy(taskpath, path);
 		path_extend(taskpath, dent->d_name);
-#endif
-        /*task = task_read(dent->d_name);*/
         task = task_read(taskpath);
         print_subtask(task, dent->d_name);
         task_free(task);
@@ -310,16 +420,12 @@ static void print_content(const char *path)
     putchar('\n');
 }
 
-char print_task(const char *path)
+char task_print(const struct task *task, const char *taskpath)
 {
-    struct task *task = task_read(path);
-    if(!task)
-        return -1;
-    if(task->name) {
+    if(task && task->name) {
         print_header(task);
         print_addinfo(task);
     }
-    print_content(path);
-	task_free(task);
+    print_subtasks(taskpath);
     return 0;
 }

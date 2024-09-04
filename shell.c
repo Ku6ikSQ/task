@@ -15,11 +15,12 @@
 #define CMD_EXIT "exit"
 #define CMD_INIT "init"
 #define CMD_MK "mk"
-#define CMD_RM "rm" 
+#define CMD_RM "rm"
 #define CMD_GO "go"
 #define CMD_SHOW "show"
 #define CMD_LN "ln"
 #define CMD_MV "mv"
+#define CMD_SET "set"
 
 #define FILTER_TASK_FLAG "-f"
 
@@ -37,14 +38,13 @@ typedef enum {
     cmd_show,
 	cmd_ln,
 	cmd_mv,
+	cmd_set,
     cmd_empty, 
     cmd_err,
 } cmd_type;
 
 typedef enum {
     success = 0,
-    st_exit,
-    st_cont,
     err_failed_init,
     err_invalid_cmd,
     err_invalid_params,
@@ -55,11 +55,24 @@ typedef enum {
 	err_failed_run,
 	err_failed_ln,
 	err_failed_mv,
+	err_failed_set,
 } status;
 
 struct state {
 	char root[bsize];
+	char cwd[bsize];
+	cmd_type last_cmd;
+	struct task *cur_task;
 };
+
+static int change_dir(const char *path, struct state *state)
+{
+	int ok = chdir(path);
+	if(ok == -1)
+		return -1;
+	getcwd(state->cwd, sizeof(state->cwd));
+	return 0;
+}
 
 static char state_init(struct state *state)
 {
@@ -69,15 +82,15 @@ static char state_init(struct state *state)
 	tmp = getcwd(state->root, sizeof(state->root));
 	if(!tmp)
 		return -1;
+	strcpy(state->cwd, state->root);
+	state->cur_task = NULL;
 	return 0;
 }
 
-static void print_cwd(const char *root)
+static void print_shortcwd(struct state *state)
 {
-	char cwd[bsize];
 	char *shortpath;
-	getcwd(cwd, sizeof(cwd));
-	shortpath = get_shortpath(root, cwd);
+	shortpath = get_shortpath(state->root, state->cwd);
 	if(!shortpath)
 		return;
 	printf("~%s$ ", shortpath);
@@ -101,18 +114,18 @@ static char *process_path(const char *path, const struct state *state)
 
 #define HELP_INFO "task -- manage todo lists.\n" \
 "Commands:\n" \
+"help -- display this information.\n" \
 "init -- initialize the project.\n" \
 "exit -- exit from the program.\n" \
-"help -- display this information.\n" \
-"mk [tname] -- making an object of task.\n" \
-"mk [tname] -f -- making an object of filter.\n" \
-"rm [tname] -- removing an object.\n" \
+"mk [taskname] -- making an object of task.\n" \
+"mk [taskname] -f -- making an object of filter.\n" \
+"rm [taskname] -- removing an object.\n" \
 "go [path] -- moving between objects.\n" \
 "show -- display content of current object.\n" \
 "show [path] -- display content of an object.\n" \
 "ln [target] [linkpath] -- link an object to another object.\n" \
 "mv [oldpath] [newpath] -- move or rename task.\n" \
-"\nTo edit tasks/filters you can to use any text editor that open the project.\n"
+"set [field] [value] -- set a value of task's field.\n"
 
 static status help_action()
 {
@@ -120,9 +133,12 @@ static status help_action()
     return 0;
 }
 
-static status exit_action()
+static status exit_action(struct state *state)
 {
-    return st_exit;
+	char ok = task_write(state->cwd, state->cur_task);
+	if(ok != 0)
+		perror("task_write");
+    return 0;
 }
 
 static status init_action()
@@ -137,17 +153,21 @@ static status init_action()
 
 static status show_action(const char *params[], struct state *state)
 {
+	struct task *task = state->cur_task;
     char cdir[bsize];
     char ok;
 	if(params && params[0]) {
 		char *path;
 		path = process_path(params[0], state);
 		strcpy(cdir, path);
+		task = task_read(cdir);
 		free(path);
 	}
 	else
-    	getcwd(cdir, sizeof(cdir));
-    ok = print_task(cdir);
+		memcpy(cdir, state->cwd, sizeof(cdir));
+    ok = task_print(task, cdir);
+	if(state->cur_task != task)
+		task_free(task);
     if(ok == -1) {
 		perror(CMD_SHOW);
         return err_failed_show;
@@ -157,18 +177,26 @@ static status show_action(const char *params[], struct state *state)
 
 static status go_action(const char *params[], struct state *state)
 {
+	struct task *new_task;
 	char *path;
 	char ok;
 	if(!params || !params[0])
 		return err_invalid_params;
 	path = process_path(params[0], state);
-	ok = chdir(path);
+	ok = task_write(state->cwd, state->cur_task);
+	if(ok != 0)
+		perror("task_write");
+	new_task = task_read(path);
+	ok = change_dir(path, state);
 	free(path);
 	if(ok == -1) {
 		perror(CMD_GO);
+		task_free(new_task);
 		return err_failed_go;
 	}
-    return show_action(NULL, NULL);
+	task_free(state->cur_task);
+	state->cur_task = new_task;
+    return show_action(NULL, state);
 }
 
 static status mk_action(const char *params[])
@@ -185,7 +213,7 @@ static status mk_action(const char *params[])
 	}
     if(param_search(params, FILTER_TASK_FLAG) != -1)
 		is_filter = 1;
-    ok = task_write(fd, is_filter);
+    ok = task_make_file(fd, is_filter);
     close(fd);
     return ok;
 }
@@ -215,10 +243,9 @@ static status ln_action(const char *params[], const struct state *state)
 	target = process_path(params[0], state);
 	linkpath = process_path(params[1], state);
 	if(!is_abspath(target)) {
-		char cwd[4096];
 		char *tmp = target;
-		getcwd(cwd, sizeof(cwd));
-		target = paths_union(cwd, target);	
+		/* TODO: check for what I did union of paths */
+		target = paths_union(state->cwd, target);
 		free(tmp);
 	}
 	ok = symlink(target, linkpath);
@@ -249,14 +276,26 @@ static status mv_action(const char *params[], const struct state *state)
 	return 0;
 }
 
+static status set_action(const char *params[], const struct state *state)
+{
+	char ok;
+	if(!params || !params[0])
+		return err_invalid_params;
+	ok = task_set_field(state->cur_task, params[0], params[1], 1);
+	if(ok == -1)
+		return err_failed_set;
+	return 0;
+}
+
 static status cmd_exec(cmd_type ctype, const char *params[], 
 	struct state *state)
 {
+	state->last_cmd = ctype;
     switch(ctype) {
         case cmd_help:
             return help_action();
         case cmd_exit:
-            return exit_action();
+            return exit_action(state);
         case cmd_init:
             return init_action();
         case cmd_mk:
@@ -271,8 +310,10 @@ static status cmd_exec(cmd_type ctype, const char *params[],
 			return ln_action(params, state);
 		case cmd_mv:
 			return mv_action(params, state);
+		case cmd_set:
+			return set_action(params, state);
         case cmd_empty:
-            return st_cont;
+            return 0;
         case cmd_err:
             return err_invalid_cmd;
     }
@@ -301,6 +342,8 @@ static cmd_type get_ctype(const char *cmd)
 		return cmd_ln;
 	if(strcmp(cmd, CMD_MV) == 0)
 		return cmd_mv;
+	if(strcmp(cmd, CMD_SET) == 0)	
+		return cmd_set;
     return cmd_err;
 }
 
@@ -331,14 +374,15 @@ static void error_log(status st)
 		case err_failed_mv:
 			fprintf(stdout, "Failed to move/rename the file\n");
 			break;
+		case err_failed_set:
+			fprintf(stdout, "Failed to set the new value\n");
+			break;
         case err_failed_init:
             fprintf(stdout, "Failed to init the project\n");
             break;
 		case err_failed_run:
 			fprintf(stdout, "Failed to run the program\n");
 			break;
-        case st_exit:
-        case st_cont:
         case success:
             break;
     }
@@ -360,28 +404,27 @@ static status process_cmd(const char *cmd, struct state *state)
     return st;
 }
 
-char shell_run(int argc, const char *argv[])
+char shell_run()
 {
 	struct state state;
     char buf[bsize];
     char *cmd;
 	char ok;
 	ok = state_init(&state);
-    print_cwd(state.root);
+    print_shortcwd(&state);
 	if(ok == -1)
 		return err_failed_run;
     while((cmd = fgets_m(buf, bsize, stdin)) != NULL) {
-        status st;
-        st = process_cmd(cmd, &state);
-        if(st == st_exit)
+        status st = process_cmd(cmd, &state);
+        if(state.last_cmd  == cmd_exit)
             break;
-        if(st == st_cont) {
-        	print_cwd(state.root);
+        if(state.last_cmd == cmd_empty) {
+        	print_shortcwd(&state);
             continue;
 		}
         if(st != 0)
             error_log(st);
-       	print_cwd(state.root);
+       	print_shortcwd(&state);
     }
     return 0;
 }

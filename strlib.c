@@ -1,6 +1,6 @@
 #include "strlib.h"
 #include <stdlib.h>
-#include <string.h>
+#include <string.h> 
 #include <stdarg.h>
 
 enum {
@@ -76,10 +76,13 @@ char **get_tokens(const char *s)
     return items;
 }
 
-static long long strings_length(va_list *vl)
+static long long strings_length(const char *fstr, va_list *vl)
 {
-    long long result = 0;
+    long long result;
     char *s;
+	if(!fstr || !vl)
+		return -1;
+	result = strlen(fstr);
     while((s = va_arg(*vl, char *)) != NULL)
         result += strlen(s);
     return result;
@@ -93,8 +96,10 @@ char *strings_concatenate(const char *s, ...)
     if(!s)
         return NULL;
     va_start(vl, s);
-    rlen = strings_length(&vl);
+    rlen = strings_length(s, &vl);
     va_end(vl);
+	if(rlen <= 0)
+		return NULL;
     va_start(vl, s);
     result = malloc(sizeof(*result)*(rlen+1));
     tmp = result;
@@ -161,3 +166,23 @@ char *get_word(const char *s, long long *offset)
 	*offset = i;
 	return word;
 }
+
+#if 1
+static void string_shl_aux(char *str)
+{
+	while(*str) {
+		str[0] = str[1];
+		str++;
+	}
+}
+
+char string_shl(char *str, unsigned long long shift)
+{
+	unsigned long long i;
+	if(!str)
+		return -1;
+	for(i = 0; i < shift; i++)
+		string_shl_aux(str);
+	return 0;
+}
+#endif
