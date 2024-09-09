@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <sys/wait.h>
 
 #define CMD_HELP "help"
 #define CMD_EXIT "exit"
@@ -21,6 +22,7 @@
 #define CMD_LN "ln"
 #define CMD_MV "mv"
 #define CMD_SET "set"
+#define CMD_CLEAR "clear"
 
 #define FILTER_TASK_FLAG "-f"
 
@@ -39,6 +41,7 @@ typedef enum {
 	cmd_ln,
 	cmd_mv,
 	cmd_set,
+	cmd_clear,
     cmd_empty, 
     cmd_err,
 } cmd_type;
@@ -55,6 +58,7 @@ typedef enum {
 	err_failed_run,
 	err_failed_ln,
 	err_failed_mv,
+	err_failed_clear,
 	err_failed_set,
 } status;
 
@@ -125,7 +129,8 @@ static char *process_path(const char *path, const struct state *state)
 "show [path] -- display content of an object.\n" \
 "ln [target] [linkpath] -- link an object to another object.\n" \
 "mv [oldpath] [newpath] -- move or rename task.\n" \
-"set [field] [value] -- set a value of task's field.\n"
+"set [field] [value] -- set a value of task's field.\n" \
+"clear -- clear the terminal screen.\n"
 
 static status help_action()
 {
@@ -211,7 +216,7 @@ static status mk_action(const char *params[])
 		perror(CMD_MK);
         return err_failed_mk;
 	}
-    if(param_search(params, FILTER_TASK_FLAG) != -1)
+    if(param_search(params, FILTER_TASK_FLAG, NULL) != -1)
 		is_filter = 1;
     ok = task_make_file(fd, is_filter);
     close(fd);
@@ -244,7 +249,6 @@ static status ln_action(const char *params[], const struct state *state)
 	linkpath = process_path(params[1], state);
 	if(!is_abspath(target)) {
 		char *tmp = target;
-		/* TODO: check for what I did union of paths */
 		target = paths_union(state->cwd, target);
 		free(tmp);
 	}
@@ -287,6 +291,20 @@ static status set_action(const char *params[], const struct state *state)
 	return 0;
 }
 
+static status clear_action()
+{
+	int pid = fork();
+	if(pid == -1)
+		return err_failed_clear;
+	if(pid == 0) {
+		execlp(CMD_CLEAR, CMD_CLEAR, NULL);
+		perror(CMD_CLEAR);
+		return err_failed_clear;
+	}
+	wait(NULL);
+	return 0;
+}
+
 static status cmd_exec(cmd_type ctype, const char *params[], 
 	struct state *state)
 {
@@ -312,6 +330,8 @@ static status cmd_exec(cmd_type ctype, const char *params[],
 			return mv_action(params, state);
 		case cmd_set:
 			return set_action(params, state);
+		case cmd_clear:
+			return clear_action();
         case cmd_empty:
             return 0;
         case cmd_err:
@@ -344,6 +364,8 @@ static cmd_type get_ctype(const char *cmd)
 		return cmd_mv;
 	if(strcmp(cmd, CMD_SET) == 0)	
 		return cmd_set;
+	if(strcmp(cmd, CMD_CLEAR) == 0)
+		return cmd_clear;
     return cmd_err;
 }
 
@@ -377,6 +399,9 @@ static void error_log(status st)
 		case err_failed_set:
 			fprintf(stdout, "Failed to set the new value\n");
 			break;
+		case err_failed_clear:
+			fprintf(stdout, "Failed to clear the screen\n");
+			break;
         case err_failed_init:
             fprintf(stdout, "Failed to init the project\n");
             break;
@@ -388,6 +413,14 @@ static void error_log(status st)
     }
 }
 
+static void process_params(char **params)
+{
+	while(*params) {
+		set_special_chars(*params);
+		params++;
+	}
+}
+
 static status process_cmd(const char *cmd, struct state *state)
 {
     status st;
@@ -397,8 +430,9 @@ static status process_cmd(const char *cmd, struct state *state)
         return err_invalid_cmd;
     params = get_tokens(cmd);
     ctype = get_ctype(params[0]);
-    if(ctype == cmd_err)
+	if(ctype == cmd_err)
         return err_invalid_cmd;
+	process_params(params);
     st = cmd_exec(ctype, (const char **)(params+1), state);
     mem_free((void **)params);
     return st;
@@ -411,11 +445,12 @@ char shell_run()
     char *cmd;
 	char ok;
 	ok = state_init(&state);
-    print_shortcwd(&state);
 	if(ok == -1)
 		return err_failed_run;
+    print_shortcwd(&state);
     while((cmd = fgets_m(buf, bsize, stdin)) != NULL) {
-        status st = process_cmd(cmd, &state);
+		status st;
+        st = process_cmd(cmd, &state);
         if(state.last_cmd  == cmd_exit)
             break;
         if(state.last_cmd == cmd_empty) {
@@ -423,7 +458,7 @@ char shell_run()
             continue;
 		}
         if(st != 0)
-            error_log(st);
+			error_log(st);
        	print_shortcwd(&state);
     }
     return 0;

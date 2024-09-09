@@ -88,19 +88,6 @@ static char *field_extend(const char *str, const char *ext)
 	return newstr;
 }
 
-char set_newlines(char *str)
-{
-	char *match;
-	if(!str)
-		return -1;
-	while((match = strstr(str, "\\n")) != NULL) {
-		//string_shl(match, 1);
-		match[0] = '\n';
-		match[1] = ' ';
-	}
-	return 0;
-}
-
 static void task_set_text_field(char **pfield, const char *value, 
 	char rewrite)
 {
@@ -112,7 +99,6 @@ static void task_set_text_field(char **pfield, const char *value,
 		free(*pfield);
 	}
 	*pfield = newval;
-	set_newlines(*pfield);
 }
 
 static void task_set_name(struct task *task, const char *value,
@@ -129,6 +115,8 @@ static void task_set_info(struct task *task, const char *value,
 
 static void task_set_completed(struct task *task, const char *value)
 {
+	if(!value)
+		return;
 	if((strcmp(value, "true") == 0) || (strcmp(value, "1") == 0))
 		task->completed = 1;
 	else if((strcmp(value, "false") == 0) || (strcmp(value, "0") == 0))
@@ -146,12 +134,11 @@ static void task_set_deadlines(struct task *task, const char *name,
 		task->dlines->from = NULL;
 		task->dlines->to = NULL;
 	}
-	if(!value || !*value)
-		return;
+	value = (value && *value) ? string_duplicate(value) : NULL;
 	if(strcmp(name, "from") == 0)
-		task->dlines->from = string_duplicate(value);
+		task->dlines->from = (char *)value;
 	else if(strcmp(name, "to") == 0)
-		task->dlines->to = string_duplicate(value);
+		task->dlines->to = (char *)value;
 }
 
 static void task_set_type(struct task *task, const char *type)
@@ -241,16 +228,36 @@ static char *get_record_str(const char *name, const char *value)
 	if(!name)
 		return NULL;
 	if(!value)
-		return strings_concatenate(name, "\n", NULL);
-	return strings_concatenate(name, " ", value, "\n", NULL);
+		return strdup(name);
+	return strings_concatenate(name, " ", value, NULL);
 }
 
 static char write_text_field_record(FILE *f, const char *name, 
 	const char *value)
 {
 	char ok;
+	char *output, *tmp_ou, *tmp_rec;
 	char *rec = get_record_str(name, value);
-	ok = fputs(rec, f) != EOF;
+	long long len_ou;
+	tmp_rec = rec;
+	if(!rec)
+		return -1;
+	len_ou = (string_length(rec)+1)*2;
+	output = malloc(sizeof(*output)*len_ou);
+	tmp_ou = output;
+	while(*tmp_rec) {
+		*tmp_ou = *tmp_rec;
+		tmp_ou++;
+		if(*tmp_rec == '\n') {
+			*tmp_ou = ' ';
+			tmp_ou++;
+		}
+		tmp_rec++;
+	}
+	*tmp_ou = '\n';
+	*(tmp_ou+1) = 0;
+	ok = fputs(output, f) != EOF;
+	free(output);
 	free(rec);
 	return ok;
 }
@@ -327,19 +334,6 @@ static char get_task_status(const struct task *task)
     return task->completed ? 'v' : 'x';
 }
 
-static void align_str(char *s)
-{
-	while(*s) {
-		if(*s == '\n') {
-			s++;
-			while(*s == ' ')
-				string_shl(s, 1);
-			continue;
-		}
-		s++;
-	}
-}
-
 static void print_header(const struct task *task)
 {
 	char status;
@@ -348,14 +342,15 @@ static void print_header(const struct task *task)
 		return;
 	name = strdup(task->name);
 	info = task->info ? strdup(task->info) : "";
-	align_str(name);
-	align_str(info);
 	status = get_task_status(task);
     if(task->type == task_filter) {
-        printf("====%s====\n%s\n\n", task->name, info);
+        printf("====%s====\n%s\n\n", name, info);
     } else {
-        printf("====[%c] %s====\n%s\n\n", status, task->name, info);
+        printf("====[%c] %s====\n%s\n\n", status, name, info);
     }
+	free(name);
+	if(*info)
+		free(info);
 }
 
 #define DLINES_SEP " -- "

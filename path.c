@@ -35,7 +35,6 @@ char path_extend(char *path, const char *ext)
 	return 0;
 }
 
-/* TODO: rewrite it by using "path_extend()" */
 char *paths_union(const char *path1, const char *path2)
 {
 	long long len1, len2;
@@ -46,14 +45,6 @@ char *paths_union(const char *path1, const char *path2)
 	len1 = strlen(path1);
 	len2 = strlen(path2);
 	result = malloc(sizeof(*result)*(len1+len2+1+1)); /* +1:'/' +1:'\0' */
-#if 0
-	memcpy(result, path1, len1);
-	if(path1[len1-1] != path_delim) {
-		result[len1] = path_delim;
-		result[len1+1] = 0;
-	}
-	strcat(result, path2);
-#endif
 	strcpy(result, path1);
 	ok = path_extend(result, path2);
 	if(ok != 0) {

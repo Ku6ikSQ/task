@@ -44,7 +44,7 @@ static char *get_token(const char *s, long long *offset)
     }
     len = strlen(s);
     for(i = 0; i < len; i++) {
-        if(quoted && s[i] == comma_chr)
+        if(quoted && (s[i] == comma_chr) && ((i-1) >= 0) && (s[i-1] != '\\'))
             break;
         if(!quoted && s[i] == space_chr)
             break;
@@ -167,7 +167,6 @@ char *get_word(const char *s, long long *offset)
 	return word;
 }
 
-#if 1
 static void string_shl_aux(char *str)
 {
 	while(*str) {
@@ -185,4 +184,37 @@ char string_shl(char *str, unsigned long long shift)
 		string_shl_aux(str);
 	return 0;
 }
-#endif
+
+static int get_special_char(char id)
+{
+	switch(id) {
+		case 'n':
+			return '\n';
+		case 't':
+			return '\t';
+		case '\'':
+		case '\"':
+		case '\\':
+			return id;
+		default:
+			return -1;
+	}
+}
+
+char set_special_chars(char *str)
+{
+	long long i;
+	if(!str)
+		return -1;
+	for(i = 0; str[i] && str[i+1]; i++) {
+		int schr;
+		if(str[i] != '\\')
+			continue;
+		schr = get_special_char(str[i+1]);
+		if(schr == -1)
+			continue;
+		str[i] = schr;
+		string_shl((str+i+1), 1);
+	}
+	return 0;
+}

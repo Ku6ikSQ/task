@@ -2,7 +2,7 @@
 #include "params.h"
 #include <stdio.h>
 
-#define TASKP_VERSION "task: v0.90\n"
+#define TASKP_VERSION "task: v1.0\n"
 
 static int process_version_param()
 {
