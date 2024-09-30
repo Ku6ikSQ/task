@@ -1,4 +1,5 @@
 #include "strlib.h"
+#include "memlib.h"
 #include <stdlib.h>
 #include <string.h> 
 #include <stdarg.h>
@@ -44,7 +45,7 @@ static char *get_token(const char *s, long long *offset)
     }
     len = strlen(s);
     for(i = 0; i < len; i++) {
-        if(quoted && (s[i] == comma_chr) && ((i-1) >= 0) && (s[i-1] != '\\'))
+        if(quoted && (s[i] == comma_chr) && (s[i-1] != '\\'))
             break;
         if(!quoted && s[i] == space_chr)
             break;
@@ -162,27 +163,9 @@ char *get_word(const char *s, long long *offset)
 	for(i = 0; (i < len) && (s[i] != ' '); i++)
 		word[i] = s[i];
 	word[i] = 0;
-	word = realloc(word, i+1);
+	word = realloc(word, sizeof(*word)*(i+1));
 	*offset = i;
 	return word;
-}
-
-static void string_shl_aux(char *str)
-{
-	while(*str) {
-		str[0] = str[1];
-		str++;
-	}
-}
-
-char string_shl(char *str, unsigned long long shift)
-{
-	unsigned long long i;
-	if(!str)
-		return -1;
-	for(i = 0; i < shift; i++)
-		string_shl_aux(str);
-	return 0;
 }
 
 static int get_special_char(char id)
@@ -214,7 +197,90 @@ char set_special_chars(char *str)
 		if(schr == -1)
 			continue;
 		str[i] = schr;
-		string_shl((str+i+1), 1);
+		string_shift(&(str[i+1]), -1);
 	}
 	return 0;
+}
+
+static void string_shl_aux(char *str)
+{
+	while(*str) {
+		str[0] = str[1];
+		str++;
+	}
+}
+
+static void string_shr_aux(char *str)
+{
+	long long i, len = strlen(str);
+	char prev = str[0];
+	for(i = 1; i <= len; i++) {
+		char tmp = prev;
+		prev = str[i];
+		str[i] = tmp;
+	}
+	str[len+1] = 0;
+}
+
+char string_shift(char *str, long long shift)
+{
+	unsigned long long i;
+	void (*aux)(char *);
+	if(!str)
+		return -1;
+	if(shift < 0) {
+		aux = string_shl_aux;
+		shift *= -1;
+	}
+	else
+		aux = string_shr_aux;
+	for(i = 0; i < shift; i++)
+		aux(str);
+	return 0;
+}
+
+char is_number(int ch)
+{
+	return (ch >= '0') && (ch <= '9');
+}
+
+static char has_prefix(const char *str, const char *prefix)
+{
+	long long slen, plen, i;
+	if(!str || !prefix)
+		return 0;
+	plen = strlen(prefix);
+	slen = strlen(str);
+	if(plen > slen)
+		return 0;
+	for(i = 0; i < plen; i++)
+		if(str[i] != prefix[i])
+			return 0;
+	return 1;
+}
+
+const char **get_strings_by_prefix(const char **strs, long long count,
+	const char *prefix)
+{
+	long long i, size;
+	const char **matches, **tmp;
+	if(!strs || !prefix || (count <= 0))
+		return NULL;
+	size = sizeof(*matches)*(count+1);
+	matches = malloc(size);
+	if(*prefix == 0) {
+		memcpy(matches, strs, size);
+		return matches;
+	}
+	tmp = matches;
+	for(i = 0; i < count; i++) {
+		if(!has_prefix(strs[i], prefix))
+			continue;
+		*tmp = strs[i];
+		tmp++;
+	}
+	*tmp = NULL;
+	count = tmp-matches;
+	matches = realloc(matches, sizeof(*matches)*(count+1));
+	return matches;
 }

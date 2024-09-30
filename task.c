@@ -10,13 +10,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#define TNAME_FLD "name"
-#define TINFO_FLD "info"
-#define TCOMPLETED_FLD "completed"
-#define TFROM_FLD "from"
-#define TTO_FLD "to"
-#define TTYPE_FLD "type"
-
 #define TASK_FILTER_TEMPLATE TNAME_FLD "\n" TINFO_FLD "\n"
 #define TASK_TEMPLATE TNAME_FLD "\n" TINFO_FLD "\n" TCOMPLETED_FLD \
 	" false\n" TFROM_FLD "\n" TTO_FLD "\n"
@@ -276,7 +269,7 @@ static char write_completed_record(FILE *f, char completed)
 {
 	char ok;
 	char *rec = get_record_str(TCOMPLETED_FLD, 
-		completed ? "true" : "false");
+		completed ? "true\n" : "false\n");
 	ok = fputs(rec, f) != EOF;
 	free(rec);
 	return ok;
@@ -423,4 +416,11 @@ char task_print(const struct task *task, const char *taskpath)
     }
     print_subtasks(taskpath);
     return 0;
+}
+
+char is_taskname(const char *str)
+{
+	char first = str[0], second = str[1], third = str[2];
+	return (first == '.') && 
+		((second == '/') || ((second == '.') && (third == '/')));
 }

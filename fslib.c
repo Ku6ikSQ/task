@@ -97,3 +97,18 @@ char *fgets_m(char *s, int size, FILE *stream)
         s[strlen(s)-1] = 0;
     return result;
 }
+
+char *get_shortname(const char *fullname)
+{
+	char *shortname;
+	const char *tmp = fullname;
+	if(!fullname)
+		return NULL;
+	while((*fullname != '/') && (*fullname != 0))
+		fullname++;
+	if(*fullname)
+		fullname++;
+	shortname = malloc(sizeof(*shortname)*(fullname-tmp+1));
+	strcpy(shortname, fullname);
+	return shortname;
+}

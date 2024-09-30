@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "readline.h"
 #include "params.h"
 #include "strlib.h"
 #include "memlib.h"
@@ -8,9 +9,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <sys/types.h>
 
 #define CMD_HELP "help"
 #define CMD_EXIT "exit"
@@ -98,6 +101,7 @@ static void print_shortcwd(struct state *state)
 	if(!shortpath)
 		return;
 	printf("~%s$ ", shortpath);
+	fflush(stdout);
 }
 
 static char *process_path(const char *path, const struct state *state)
@@ -114,6 +118,19 @@ static char *process_path(const char *path, const struct state *state)
 		path++; /* skip '/' */
 	newpath = paths_union(state->root, path);
 	return newpath;
+}
+
+static char *get_full_destpath(const char *path, const char *ext)
+{
+	char *result, *shortname;
+	long long len;
+	len = strlen(path);
+	if(path[len-1] != '/')
+		return strdup(path);	
+	shortname = get_shortname(ext);
+	result = strings_concatenate(path, shortname, NULL);	
+	free(shortname);
+	return result;
 }
 
 #define HELP_INFO "task -- manage todo lists.\n" \
@@ -242,17 +259,19 @@ static status rm_action(const char *params[])
 static status ln_action(const char *params[], const struct state *state)
 {
 	char ok;
-	char *target, *linkpath;
+	char *target, *linkpath, *full_linkpath;
 	if(!params || !params[0] || !params[1])
 		return err_invalid_params;
 	target = process_path(params[0], state);
 	linkpath = process_path(params[1], state);
+	full_linkpath = get_full_destpath(linkpath, target);
 	if(!is_abspath(target)) {
 		char *tmp = target;
 		target = paths_union(state->cwd, target);
 		free(tmp);
 	}
-	ok = symlink(target, linkpath);
+	ok = symlink(target, full_linkpath);
+	free(full_linkpath);
 	free(target);
 	free(linkpath);
 	if(ok == -1) {
@@ -265,12 +284,14 @@ static status ln_action(const char *params[], const struct state *state)
 static status mv_action(const char *params[], const struct state *state)
 {
 	char ok;
-	char *oldpath, *newpath;
+	char *oldpath, *newpath, *completed_newpath;
 	if(!params || !params[0] || !params[1])
 		return err_invalid_params;
 	oldpath = process_path(params[0], state);
 	newpath = process_path(params[1], state);
-	ok = rename(oldpath, newpath);
+	completed_newpath = get_full_destpath(newpath, oldpath);
+	ok = rename(oldpath, completed_newpath);
+	free(completed_newpath);
 	free(oldpath);
 	free(newpath);
 	if(ok == -1) {
@@ -438,28 +459,80 @@ static status process_cmd(const char *cmd, struct state *state)
     return st;
 }
 
+static void fill_by_path(struct list *lst, const char *path)
+{
+	DIR *dir;
+	struct dirent *dent;
+	struct list *tmp;
+	long long i;
+	if(path[0] != '.')
+		return;
+	if(lst->count != 0) {
+		for(i = 0; i < lst->count; i++)
+			free(lst->words[i]);
+		free(lst->words);
+		tmp = list_create(NULL);
+		memcpy(lst, tmp, sizeof(*tmp));
+	}
+	if(path[1] == '/') 
+		dir = opendir(".");
+	else if(path[1] == '.')
+		dir = opendir("..");
+	for(i = 0; (dent = readdir(dir)) != NULL; i++)
+		list_append(lst, dent->d_name);
+	lst->words[i] = NULL;
+	closedir(dir);
+}
+
+static void get_lists(struct readline_list *(*lists)[3])
+{
+	(*lists)[0] = malloc(sizeof((*lists)[0]));
+	(*lists)[0]->value = list_create(CMD_HELP, CMD_EXIT, CMD_INIT, CMD_MK,
+			CMD_RM, CMD_GO, CMD_SHOW, CMD_LN, CMD_MV, CMD_SET, CMD_CLEAR,
+			TNAME_FLD, TINFO_FLD, TFROM_FLD, TTO_FLD, TTYPE_FLD, 
+			TCOMPLETED_FLD, NULL);
+	(*lists)[0]->before_action = NULL;
+	(*lists)[0]->check_rule = NULL;
+	(*lists)[1] = malloc(sizeof((*lists)[1]));
+	(*lists)[1]->value = list_create(NULL);
+	(*lists)[1]->before_action = fill_by_path;
+	(*lists)[1]->check_rule = is_taskname;
+	(*lists)[2] = NULL;
+}
+
+static void free_lists(struct readline_list *lists[3])
+{
+	list_free(lists[0]->value);
+	free(lists[0]);
+	list_free(lists[1]->value);
+	free(lists[1]);
+}
+
 char shell_run()
 {
 	struct state state;
-    char buf[bsize];
-    char *cmd;
+	struct input input;
+	struct readline_list *(lists[3]);
 	char ok;
 	ok = state_init(&state);
 	if(ok == -1)
 		return err_failed_run;
-    print_shortcwd(&state);
-    while((cmd = fgets_m(buf, bsize, stdin)) != NULL) {
+	get_lists(&lists);
+	input_init(&input);
+	while(readline(&input, (const struct readline_list **)&lists,
+			(readline_before_action_t)print_shortcwd,
+			(void *)(&state)) != NULL) {
 		status st;
-        st = process_cmd(cmd, &state);
-        if(state.last_cmd  == cmd_exit)
+		input.value[strlen(input.value)-1] = 0; /* to remove the newline */
+        st = process_cmd(input.value, &state);
+        if(state.last_cmd == cmd_exit)
             break;
-        if(state.last_cmd == cmd_empty) {
-        	print_shortcwd(&state);
+        if(state.last_cmd == cmd_empty)
             continue;
-		}
         if(st != 0)
 			error_log(st);
-       	print_shortcwd(&state);
-    }
+		input_init(&input);
+	}
+	free_lists(lists);
     return 0;
 }

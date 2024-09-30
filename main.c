@@ -1,8 +1,9 @@
+#include "readline.h"
 #include "shell.h"
 #include "params.h"
 #include <stdio.h>
 
-#define TASKP_VERSION "task: v1.0\n"
+#define TASKP_VERSION "task: v1.1.7\n"
 
 static int process_version_param()
 {
@@ -30,6 +31,8 @@ int main(int argc, const char *argv[])
 	status = process_params(argc, argv, &terminate);
 	if(terminate)
 		return status;
+	readline_start();
     status = shell_run();
+	readline_end();
     return status;
 }
